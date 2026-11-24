@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Gestion du budget</title>
+<script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+<style>
+:root{--ac:#16b378;--ac-bg:#e8f7f1;--ac-dk:#0f7a52;--bd:#e3e3e3;--bg2:#f7f7f8;--tx:#262633;--tx2:#6b6b78;--red:#d64545;--red-bg:#fdecec;--amb:#b7791f;--amb-bg:#fdf4e3;--blue:#3b82c4;--blue-bg:#e8f1fb;--inv:#2f7d32;--inv-bg:#e6f4e6;--fon:#8a5a00;--fon-bg:#fdf1d8}
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif;font-size:13px;color:var(--tx);background:#fff}
+header{display:flex;align-items:center;gap:10px;padding:12px 16px 0;flex-wrap:wrap}
+header h1{font-size:16px;font-weight:600;margin:0;flex:1;min-width:200px}
+nav{display:flex;gap:2px;border-bottom:1px solid var(--bd);padding:0 16px;margin-top:10px}
+nav button{background:none;border:none;border-bottom:2px solid transparent;padding:9px 12px;font-size:13px;color:var(--tx2);cursor:pointer}
+nav button.on{color:var(--tx);border-bottom-color:var(--ac);font-weight:600}
+main{padding:14px 16px 40px}
+select,input,textarea{font:inherit;font-size:13px;height:30px;padding:0 8px;border:1px solid var(--bd);border-radius:6px;background:#fff;color:var(--tx)}
+textarea{height:54px;padding:6px 8px;resize:vertical}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--ac)}
+button.b{font:inherit;height:30px;padding:0 12px;border:1px solid var(--bd);border-radius:6px;background:#fff;cursor:pointer;color:var(--tx)}
+button.b:hover{background:var(--bg2)}
+button.p{background:var(--ac);border-color:var(--ac);color:#fff}
+button.p:hover{background:var(--ac-dk)}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px}
+.card{background:var(--bg2);border-radius:8px;padding:10px 14px}
+.card .l{font-size:12px;color:var(--tx2)}.card .v{font-size:20px;font-weight:600;margin-top:2px}
+.box{border:1px solid var(--bd);border-radius:10px;overflow:auto}
+table{width:100%;border-collapse:collapse}
+th,td{padding:7px 9px;border-bottom:1px solid var(--bd);text-align:left;vertical-align:middle}
+th{font-size:12px;font-weight:500;color:var(--tx2);background:var(--bg2);position:sticky;top:0;white-space:nowrap}
+tr:last-child td{border-bottom:none}
+tbody tr.click{cursor:pointer}tbody tr.click:hover{background:var(--bg2)}
+tr.sel{background:var(--ac-bg)!important}
+.r{text-align:right;white-space:nowrap}
+.sub{font-size:12px;color:var(--tx2)}
+.pill{display:inline-block;font-size:11px;padding:2px 8px;border-radius:10px;white-space:nowrap}
+.inv{background:var(--inv-bg);color:var(--inv)}.fon{background:var(--fon-bg);color:var(--fon)}
+.neg{color:var(--red)}.pos{color:var(--inv)}.mut{color:#aaa}
+.bar{height:9px;background:#eee;border-radius:5px;overflow:hidden;display:flex}
+.bar i{display:block;height:100%}
+.yr{display:grid;grid-template-columns:52px 1fr 230px;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid var(--bd)}
+.form{border:1px solid var(--bd);border-radius:10px;padding:12px 14px;margin-bottom:14px;background:#fff}
+.form h3{margin:0 0 10px;font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
+.f label{display:block;font-size:12px;color:var(--tx2);margin-bottom:3px}
+.f input,.f select,.f textarea{width:100%}
+.f.w2{grid-column:span 2}
+.acts{display:flex;gap:8px;align-items:center;margin-top:12px}
+.err{color:var(--red);font-size:12.5px}
+.warn{background:var(--amb-bg);color:var(--amb);border-radius:8px;padding:8px 12px;margin:10px 0;font-size:12.5px}
+.alert{background:var(--red-bg);color:var(--red);border-radius:8px;padding:8px 12px;margin:10px 0;font-size:12.5px}
+.tools{display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
+.sp{flex:1}
+h2{font-size:14px;font-weight:600;margin:18px 0 8px}
+#toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#262633;color:#fff;padding:9px 16px;border-radius:8px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:9}
+#toast.on{opacity:1}
+.empty{padding:16px;color:var(--tx2);text-align:center}
+.legend{display:flex;gap:14px;font-size:12px;color:var(--tx2);margin-bottom:6px}
+.legend span::before{content:"";display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px;background:var(--c)}
+</style>
+</head>
+<body>
+<header>
+  <h1 id="titre">Gestion du budget</h1>
+  <label class="sub" for="fAxe">Axe</label>
+  <select id="fAxe"><option value="">Tous</option></select>
+  <button class="b" id="btnRefresh" title="Recharger les données">↻</button>
+</header>
+<nav id="tabs"></nav>
+<main id="view"><div class="empty">Chargement…</div></main>
+<div id="toast"></div>
+
+<script>
+/* ================== CONFIGURATION ==================
+   Identifiants des tables et colonnes Grist (ID, pas le libellé).
+   Adaptez-les ici si un nom diffère dans votre document. */
+const CFG = {
+  titre: 'Gestion du budget',
+  budget: {
+    table: 'Budget_previsionnel',
+    annee: 'Annee', axe: 'Axe', ref: 'Reference_Budget', com: 'Commentaire',
+    section: 'Section', service: 'Service', groupement: 'Groupement',
+    montant: 'Montant', libelle: 'Libelle',
+    entrants: 'Reports_entrants', sortants: 'Reports_sortants',
+    dispo: 'Budget_disponible', consomme: 'Consomme', reste: 'A_consommer'
+  },
+  cmd: {
+    table: 'Commande2',
+    ligne: 'Reference_Budget', annee: 'Annee', section: 'Section',
+    date: 'Date', num: 'ID_Commande', presta: 'Prestataire', resp: 'Responsable',
+    type: 'Type_Achat', montant: 'Montant', com: 'Commentaire', meo: 'Id_Action_MEO'
+  },
+  rep: {
+    table: 'Reports',
+    source: 'Ligne_source', cible: 'Ligne_cible', montant: 'Montant',
+    motif: 'Motif', date: 'Date_report', auteur: 'Auteur'
+  }
+};
+/* ==================================================== */
+
+const B = CFG.budget, C = CFG.cmd, R = CFG.rep;
+const S = { tab: 0, axe: '', yr: '', sec: '', editLine: null, editCmd: null, cmdYr: '', over: false,
+            repFrom: '', repTo: '', meta: null, data: {}, refCache: {}, missing: [] };
+const $ = id => document.getElementById(id);
+const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const num = v => (typeof v === 'number' && isFinite(v)) ? v : (parseFloat(v) || 0);
+const eur = v => Math.round(num(v)).toLocaleString('fr-FR') + ' €';
+const todaySec = () => { const d = new Date(); return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 1000; };
+const fmtDate = v => v ? new Date(v * 1000).toLocaleDateString('fr-FR', { timeZone: 'UTC' }) : '';
+const isoDate = v => v ? new Date(v * 1000).toISOString().slice(0, 10) : '';
+function toast(m) { const t = $('toast'); t.textContent = m; t.classList.add('on'); setTimeout(() => t.classList.remove('on'), 2600); }
+
+/* ---------- Métadonnées ---------- */
+async function loadMeta() {
+  const tb = await grist.docApi.fetchTable('_grist_Tables');
+  const cl = await grist.docApi.fetchTable('_grist_Tables_column');
+  const tables = {}; tb.id.forEach((id, i) => tables[id] = tb.tableId[i]);
+  const byRowId = {}; const cols = {};
+  cl.id.forEach((id, i) => {
+    const t = tables[cl.parentId[i]]; if (!t) return;
+    let wo = {}; try { wo = JSON.parse(cl.widgetOptions[i] || '{}'); } catch (e) {}
+    const c = { id, table: t, colId: cl.colId[i], type: cl.type[i], isFormula: cl.isFormula[i],
+                formula: cl.formula[i], visibleCol: cl.visibleCol[i], choices: wo.choices || [], label: cl.label[i] };
+    byRowId[id] = c; (cols[t] = cols[t] || {})[c.colId] = c;
+  });
+  S.meta = { tables: Object.values(tables), cols, byRowId };
+}
+const col = (t, c) => S.meta.cols[t] && S.meta.cols[t][c];
+const hasT = t => S.meta.tables.includes(t);
+const refTarget = (t, c) => { const m = col(t, c); return m && /^Ref:/.test(m.type) ? m.type.slice(4) : null; };
+const writable = (t, c) => { const m = col(t, c); return m && !(m.isFormula && m.formula); };
+
+function toRows(d) { const keys = Object.keys(d); return (d.id || []).map((_, i) => { const r = {}; keys.forEach(k => r[k] = d[k][i]); return r; }); }
+
+async function refLabels(t, c) {
+  const target = refTarget(t, c); if (!target) return null;
+  const key = target + '|' + (col(t, c).visibleCol || 0);
+  if (S.refCache[key]) return S.refCache[key];
+  const vc = S.meta.byRowId[col(t, c).visibleCol];
+  const d = toRows(await grist.docApi.fetchTable(target));
+  const map = {};
+  d.forEach(r => { let v = vc ? r[vc.colId] : r.id; map[r.id] = v == null ? '' : String(Array.isArray(v) ? v.slice(1).join(', ') : v); });
+  return (S.refCache[key] = map);
+}
+function disp(t, c, v) {
+  const target = refTarget(t, c);
+  if (target) { const key = target + '|' + (col(t, c).visibleCol || 0); return (S.refCache[key] || {})[v] ?? (v ? '#' + v : ''); }
+  if (Array.isArray(v)) return v.slice(1).join(', ');
+  return v == null ? '' : String(v);
+}
+
+/* ---------- Chargement ---------- */
+async function load() {
+  try {
+    if (!S.meta) await loadMeta();
+    S.refCache = {}; S.missing = [];
+    for (const [t, cfg] of [[B.table, B], [C.table, C], [R.table, R]]) {
+      if (!hasT(t)) { S.missing.push(`Table « ${t} » introuvable`); continue; }
+      for (const k of Object.keys(cfg)) if (k !== 'table' && !col(t, cfg[k])) cfg === B && ['libelle','groupement'].includes(k) || S.missing.push(`${t}.${cfg[k]}`);
+    }
+    if (!hasT(B.table)) { render(); return; }
+    S.data.B = toRows(await grist.docApi.fetchTable(B.table));
+    S.data.C = hasT(C.table) ? toRows(await grist.docApi.fetchTable(C.table)) : [];
+    S.data.R = hasT(R.table) ? toRows(await grist.docApi.fetchTable(R.table)) : [];
+    const refs = [[B.table, B.axe], [B.table, B.service], [B.table, B.groupement],
+      [C.table, C.presta], [C.table, C.resp], [C.table, C.meo], [C.table, C.ligne]];
+    for (const [t, c] of refs) if (col(t, c)) await refLabels(t, c);
+    fillAxe(); render();
+  } catch (e) { $('view').innerHTML = `<div class="alert">Erreur de chargement : ${esc(e.message || e)}<br>Vérifiez que le widget a l'accès complet au document.</div>`; }
+}
+
+/* ---------- Accès aux lignes de budget ---------- */
+const L = id => S.data.B.find(r => r.id === id);
+const yearOf = r => String(r[B.annee] ?? '');
+const lineLabel = r => {
+  if (col(B.table, B.libelle) && r[B.libelle]) return String(r[B.libelle]);
+  return [yearOf(r), disp(B.table, B.axe, r[B.axe]), r[B.ref], r[B.com]].filter(Boolean).join(' · ');
+};
+const prevu = r => num(r[B.montant]);
+const conso = r => num(r[B.consomme]);
+const dispo = r => col(B.table, B.dispo) ? num(r[B.dispo]) : prevu(r) + repIn(r.id) - repOut(r.id);
+const reste = r => col(B.table, B.reste) ? num(r[B.reste]) : dispo(r) - conso(r);
+const repIn = id => S.data.R.filter(x => x[R.cible] === id).reduce((a, x) => a + num(x[R.montant]), 0);
+const repOut = id => S.data.R.filter(x => x[R.source] === id).reduce((a, x) => a + num(x[R.montant]), 0);
+const isInv = r => /^inv/i.test(String(r[B.section] || ''));
+const lines = () => S.data.B.filter(r => !S.axe || String(r[B.axe]) === S.axe);
+function years() {
+  const s = new Set((col(B.table, B.annee)?.choices || []).map(String));
+  S.data.B.forEach(r => yearOf(r) && s.add(yearOf(r)));
+  return [...s].sort();
+}
+function fillAxe() {
+  const sel = $('fAxe'), ids = [...new Set(S.data.B.map(r => r[B.axe]).filter(Boolean))];
+  const opts = ids.map(id => [String(id), disp(B.table, B.axe, id)]).sort((a, b) => a[1].localeCompare(b[1]));
+  sel.innerHTML = '<option value="">Tous</option>' + opts.map(([v, l]) => `<option value="${esc(v)}" ${v === S.axe ? 'selected' : ''}>${esc(l)}</option>`).join('');
+}
+const sectionPill = v => v ? `<span class="pill ${/^inv/i.test(v) ? 'inv' : 'fon'}">${esc(v)}</span>` : '';
+
+/* ---------- Champs de formulaire génériques ---------- */
+function field(t, c, v, label, cls = '') {
+  const m = col(t, c); if (!m) return '';
+  const id = `in_${t}_${c}`; let h;
+  if (/^Ref:/.test(m.type)) {
+    const map = S.refCache[m.type.slice(4) + '|' + (m.visibleCol || 0)] || {};
+    const opts = Object.entries(map).sort((a, b) => a[1].localeCompare(b[1]));
+    h = `<select id="${id}"><option value="0"></option>${opts.map(([k, l]) => `<option value="${k}" ${+k === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+  } else if (m.type === 'Choice') {
+    const ch = m.choices.map(String); if (v && !ch.includes(String(v))) ch.push(String(v));
+    h = `<select id="${id}"><option value=""></option>${ch.map(o => `<option ${o === String(v ?? '') ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+  } else if (m.type === 'Date') h = `<input type="date" id="${id}" value="${isoDate(v)}">`;
+  else if (/^(Numeric|Int)$/.test(m.type)) h = `<input type="number" step="0.01" id="${id}" value="${v ?? ''}">`;
+  else if (c === B.com || c === C.com) h = `<textarea id="${id}">${esc(v ?? '')}</textarea>`;
+  else h = `<input type="text" id="${id}" value="${esc(v ?? '')}">`;
+  return `<div class="f ${cls}"><label for="${id}">${esc(label || m.label || c)}</label>${h}</div>`;
+}
+function readField(t, c) {
+  const m = col(t, c), el = $(`in_${t}_${c}`); if (!m || !el) return undefined;
+  const v = el.value;
+  if (/^Ref:/.test(m.type)) return +v || 0;
+  if (m.type === 'Date') { if (!v) return null; const [y, mo, d] = v.split('-').map(Number); return Date.UTC(y, mo - 1, d) / 1000; }
+  if (m.type === 'Int') return v === '' ? null : parseInt(v, 10);
+  if (m.type === 'Numeric') return v === '' ? null : parseFloat(v);
+  return v;
+}
+function typed(t, c, v) { const m = col(t, c); if (!m) return v; return m.type === 'Int' || m.type === 'Numeric' ? Number(v) : String(v); }
+
+/* ---------- Onglets ---------- */
+const TABS = ['Synthèse', 'Lignes budgétaires', 'Commandes', 'Reports et historique'];
+function render() {
+  $('titre').textContent = CFG.titre;
+  $('tabs').innerHTML = TABS.map((t, i) => `<button class="${i === S.tab ? 'on' : ''}" data-t="${i}">${t}</button>`).join('');
+  const miss = S.missing.length ? `<div class="warn">Colonnes ou tables non trouvées : ${S.missing.map(esc).join(', ')}. Adaptez la section CONFIGURATION du widget.</div>` : '';
+  if (!S.data.B) { $('view').innerHTML = miss || '<div class="empty">Aucune donnée.</div>'; return; }
+  $('view').innerHTML = miss + [vSynthese, vLignes, vCommandes, vReports][S.tab]();
+  [bSynthese, bLignes, bCommandes, bReports][S.tab]();
+}
+$('tabs').onclick = e => { const t = e.target.dataset.t; if (t !== undefined) { S.tab = +t; render(); } };
+$('fAxe').onchange = e => { S.axe = e.target.value; render(); };
+$('btnRefresh').onclick = () => { S.meta = null; load(); };
+
+/* ---------- 1. Synthèse ---------- */
+function vSynthese() {
+  const ls = lines();
+  const P = ls.reduce((a, r) => a + prevu(r), 0), Co = ls.reduce((a, r) => a + conso(r), 0), Re = ls.reduce((a, r) => a + reste(r), 0);
+  const ids = new Set(ls.map(r => r.id)); const Rp = S.data.R.filter(x => ids.has(x[R.source])).reduce((a, x) => a + num(x[R.montant]), 0);
+  const cur = String(new Date().getFullYear());
+  const yrs = [...new Set(ls.map(yearOf))].filter(Boolean).sort();
+  const yrHtml = yrs.map(y => {
+    const g = ls.filter(r => yearOf(r) === y), d = g.reduce((a, r) => a + dispo(r), 0), c = g.reduce((a, r) => a + conso(r), 0);
+    const inv = g.filter(isInv).reduce((a, r) => a + dispo(r), 0), pc = d > 0 ? Math.min(100, c / d * 100) : 0;
+    return `<div class="yr"><b>${esc(y)}</b><div class="bar"><i style="width:${pc}%;background:var(--ac)"></i><i style="width:${100 - pc}%;background:#b9d6f2"></i></div>
+      <div class="r sub">${eur(c)} / ${eur(d)} · ${Math.round(pc)} %<br>Inv. ${eur(inv)} · Fonct. ${eur(d - inv)}</div></div>`;
+  }).join('');
+  const axes = {}; ls.forEach(r => { const k = disp(B.table, B.axe, r[B.axe]) || '—'; const a = axes[k] = axes[k] || [0, 0, 0, 0]; a[0] += prevu(r); a[1] += dispo(r); a[2] += conso(r); a[3] += reste(r); });
+  const late = ls.filter(r => yearOf(r) < cur && reste(r) > 0.5), over = ls.filter(r => reste(r) < -0.5);
+  return `<div class="cards">
+    <div class="card"><div class="l">Prévu initial</div><div class="v">${eur(P)}</div></div>
+    <div class="card"><div class="l">Montants reportés</div><div class="v">${eur(Rp)}</div></div>
+    <div class="card"><div class="l">Consommé</div><div class="v">${eur(Co)}</div></div>
+    <div class="card"><div class="l">Reste à consommer</div><div class="v" style="color:var(--ac-dk)">${eur(Re)}</div></div></div>
+    ${over.length ? `<div class="alert">⚠ ${over.length} ligne(s) en dépassement : ${over.map(r => esc(lineLabel(r)) + ' (' + eur(reste(r)) + ')').join(' ; ')}</div>` : ''}
+    ${late.length ? `<div class="warn">${late.length} ligne(s) d'exercices passés ont encore un reste à consommer (${eur(late.reduce((a, r) => a + reste(r), 0))}). Pensez à les reporter. <button class="b" id="goRep">Aller aux reports</button></div>` : ''}
+    <h2>Par année</h2><div class="legend"><span style="--c:var(--ac)">Consommé</span><span style="--c:#b9d6f2">Reste</span></div>
+    ${yrHtml || '<div class="empty">Aucune ligne</div>'}
+    <h2>Par axe</h2><div class="box"><table><thead><tr><th>Axe</th><th class="r">Prévu</th><th class="r">Disponible</th><th class="r">Consommé</th><th class="r">Reste</th></tr></thead><tbody>
+    ${Object.entries(axes).sort().map(([k, a]) => `<tr><td>${esc(k)}</td><td class="r">${eur(a[0])}</td><td class="r">${eur(a[1])}</td><td class="r">${eur(a[2])}</td><td class="r ${a[3] < 0 ? 'neg' : ''}"><b>${eur(a[3])}</b></td></tr>`).join('')}
+    </tbody></table></div>`;
+}
+function bSynthese() { const g = $('goRep'); if (g) g.onclick = () => { S.tab = 3; render(); }; }
+
+/* ---------- 2. Lignes budgétaires ---------- */
+function vLignes() {
+  const ls = lines().filter(r => (!S.yr || yearOf(r) === S.yr) && (!S.sec || r[B.section] === S.sec))
+    .sort((a, b) => yearOf(a).localeCompare(yearOf(b)) || lineLabel(a).localeCompare(lineLabel(b)));
+  const secs = col(B.table, B.section)?.choices || [];
+  const tot = k => ls.reduce((a, r) => a + k(r), 0);
+  return `${S.editLine !== null ? formLigne() : ''}
+  <div class="tools">
+    <select id="lYr"><option value="">Toutes les années</option>${years().map(y => `<option ${y === S.yr ? 'selected' : ''}>${esc(y)}</option>`).join('')}</select>
+    <select id="lSec"><option value="">Toutes les sections</option>${secs.map(s => `<option ${s === S.sec ? 'selected' : ''}>${esc(s)}</option>`).join('')}</select>
+    <span class="sp"></span><span class="sub">${ls.length} ligne(s)</span><button class="b p" id="lNew">+ Nouvelle ligne</button></div>
+  <div class="box"><table><thead><tr><th>Année</th><th>Ligne</th><th>Section</th><th class="r">Prévu</th><th class="r">Reports</th><th class="r">Disponible</th><th class="r">Consommé</th><th class="r">Reste</th></tr></thead><tbody>
+  ${ls.map(r => { const rp = dispo(r) - prevu(r); return `<tr class="click ${S.editLine === r.id ? 'sel' : ''}" data-id="${r.id}">
+    <td>${esc(yearOf(r))}</td><td>${esc(disp(B.table, B.axe, r[B.axe]))} · ${esc(r[B.ref])}<div class="sub">${esc(r[B.com])}</div></td>
+    <td>${sectionPill(r[B.section])}</td><td class="r">${eur(prevu(r))}</td>
+    <td class="r ${rp > 0 ? 'pos' : rp < 0 ? 'neg' : 'mut'}">${rp ? (rp > 0 ? '+' : '') + eur(rp) : '–'}</td>
+    <td class="r">${eur(dispo(r))}</td><td class="r">${eur(conso(r))}</td><td class="r ${reste(r) < 0 ? 'neg' : ''}"><b>${eur(reste(r))}</b></td></tr>`; }).join('') || '<tr><td colspan="8" class="empty">Aucune ligne</td></tr>'}
+  </tbody><tfoot><tr><th colspan="3">Total</th><th class="r">${eur(tot(prevu))}</th><th></th><th class="r">${eur(tot(dispo))}</th><th class="r">${eur(tot(conso))}</th><th class="r">${eur(tot(reste))}</th></tr></tfoot></table></div>`;
+}
+function formLigne() {
+  const r = S.editLine ? L(S.editLine) : {};
+  const n = !S.editLine;
+  const cmds = n ? [] : S.data.C.filter(c => c[C.ligne] === r.id);
+  const reps = n ? [] : S.data.R.filter(x => x[R.source] === r.id || x[R.cible] === r.id);
+  return `<div class="form"><h3>${n ? 'Nouvelle ligne budgétaire' : 'Ligne : ' + esc(lineLabel(r))}</h3>
+  <div class="grid">
+    ${field(B.table, B.annee, r[B.annee] ?? S.yr, 'Année')}${field(B.table, B.axe, r[B.axe] ?? (+S.axe || 0), 'Axe')}
+    ${field(B.table, B.ref, r[B.ref], 'Référence budget')}${field(B.table, B.section, r[B.section], 'Section')}
+    ${field(B.table, B.service, r[B.service], 'Service')}${field(B.table, B.montant, r[B.montant], 'Montant prévu (€)')}
+    ${field(B.table, B.com, r[B.com], 'Commentaire', 'w2')}</div>
+  ${n ? '' : `<div class="sub" style="margin-top:8px">Disponible ${eur(dispo(r))} · Consommé ${eur(conso(r))} · Reste <b>${eur(reste(r))}</b> — le montant prévu est le montant initial : les reports ne le modifient pas.</div>`}
+  <div class="acts"><button class="b p" id="lSave">${n ? 'Créer la ligne' : 'Enregistrer'}</button><button class="b" id="lCancel">Fermer</button><span class="err" id="lErr"></span></div>
+  ${cmds.length || reps.length ? `<div class="grid" style="margin-top:12px;grid-template-columns:1fr 1fr">
+    <div><div class="sub" style="margin-bottom:4px">Commandes imputées (${cmds.length})</div>${cmds.map(c => `<div>${fmtDate(c[C.date])} · ${esc(disp(C.table, C.presta, c[C.presta]))} · <b>${eur(c[C.montant])}</b></div>`).join('') || '<div class="mut">—</div>'}</div>
+    <div><div class="sub" style="margin-bottom:4px">Reports (${reps.length})</div>${reps.map(x => `<div>${fmtDate(x[R.date])} · ${x[R.source] === r.id ? '<span class="neg">sortant</span> vers ' + esc(yearOf(L(x[R.cible]) || {})) : '<span class="pos">entrant</span> de ' + esc(yearOf(L(x[R.source]) || {}))} · <b>${eur(x[R.montant])}</b></div>`).join('') || '<div class="mut">—</div>'}</div></div>` : ''}
+  </div>`;
+}
+function bLignes() {
+  $('lYr').onchange = e => { S.yr = e.target.value; render(); };
+  $('lSec').onchange = e => { S.sec = e.target.value; render(); };
+  $('lNew').onclick = () => { S.editLine = 0; render(); };
+  document.querySelectorAll('tbody tr.click').forEach(tr => tr.onclick = () => { S.editLine = +tr.dataset.id; render(); window.scrollTo(0, 0); });
+  if (S.editLine === null) return;
+  $('lCancel').onclick = () => { S.editLine = null; render(); };
+  $('lSave').onclick = async () => {
+    const f = {}; [B.annee, B.axe, B.ref, B.section, B.service, B.montant, B.com].forEach(c => { if (writable(B.table, c)) { const v = readField(B.table, c); if (v !== undefined) f[c] = v; } });
+    const e = $('lErr');
+    if (!f[B.annee]) return e.textContent = 'Indiquez l\'année';
+    if (f[B.montant] == null || isNaN(f[B.montant])) return e.textContent = 'Indiquez le montant prévu (0 accepté)';
+    try {
+      if (S.editLine) await grist.docApi.applyUserActions([['UpdateRecord', B.table, S.editLine, f]]);
+      else { const res = await grist.docApi.applyUserActions([['AddRecord', B.table, null, f]]); S.editLine = res.retValues[0]; }
+      toast('Ligne enregistrée'); await load();
+    } catch (er) { e.textContent = 'Erreur : ' + er.message; }
+  };
+}
+
+/* ---------- 3. Commandes ---------- */
+function vCommandes() {
+  const ids = new Set(lines().map(r => r.id));
+  const cs = S.data.C.filter(c => (!S.axe || ids.has(c[C.ligne])) && (!S.cmdYr || String(c[C.annee]) === S.cmdYr))
+    .sort((a, b) => num(b[C.date]) - num(a[C.date]));
+  return `${formCmd()}
+  <div class="tools"><select id="cYr"><option value="">Toutes les années</option>${years().map(y => `<option ${y === S.cmdYr ? 'selected' : ''}>${esc(y)}</option>`).join('')}</select>
+  <span class="sp"></span><span class="sub">${cs.length} commande(s) · ${eur(cs.reduce((a, c) => a + num(c[C.montant]), 0))}</span></div>
+  <div class="box"><table><thead><tr><th>Date</th><th>N° commande</th><th>Prestataire</th><th>Ligne imputée</th><th>Type d'achat</th><th class="r">Montant</th></tr></thead><tbody>
+  ${cs.map(c => { const l = L(c[C.ligne]); return `<tr class="click ${S.editCmd === c.id ? 'sel' : ''}" data-id="${c.id}"><td>${fmtDate(c[C.date])}</td><td>${esc(c[C.num])}</td>
+    <td>${esc(disp(C.table, C.presta, c[C.presta]))}<div class="sub">${esc(disp(C.table, C.resp, c[C.resp]))}</div></td>
+    <td>${l ? esc(lineLabel(l)) : '<span class="neg">Non imputée</span>'}${l && String(c[C.annee]) !== yearOf(l) ? '<div class="neg sub">⚠ Année de la commande ≠ année de la ligne : non comptée</div>' : ''}</td>
+    <td>${esc(c[C.type])}</td><td class="r"><b>${eur(c[C.montant])}</b></td></tr>`; }).join('') || '<tr><td colspan="6" class="empty">Aucune commande</td></tr>'}
+  </tbody></table></div>`;
+}
+function formCmd() {
+  const c = S.editCmd ? S.data.C.find(x => x.id === S.editCmd) || {} : {};
+  const ls = lines().slice().sort((a, b) => yearOf(a).localeCompare(yearOf(b)) || lineLabel(a).localeCompare(lineLabel(b)));
+  const cur = c[C.ligne] || 0;
+  return `<div class="form"><h3>${S.editCmd ? 'Modifier la commande ' + esc(c[C.num] || '') : 'Nouvelle commande'}</h3>
+  <div class="f" style="margin-bottom:10px"><label for="cLine">Ligne budgétaire imputée</label>
+    <select id="cLine" style="width:100%"><option value="0">— Choisir une ligne —</option>${ls.map(r => `<option value="${r.id}" ${r.id === cur ? 'selected' : ''}>${esc(lineLabel(r))} — reste ${eur(reste(r))}</option>`).join('')}</select></div>
+  <div class="grid">
+    ${field(C.table, C.date, c[C.date] ?? todaySec(), 'Date')}${field(C.table, C.num, c[C.num], 'N° commande')}
+    ${field(C.table, C.presta, c[C.presta], 'Prestataire')}${field(C.table, C.resp, c[C.resp], 'Responsable')}
+    ${field(C.table, C.type, c[C.type], 'Type d\'achat')}${field(C.table, C.montant, c[C.montant], 'Montant (€)')}
+    ${field(C.table, C.section, c[C.section], 'Section')}${field(C.table, C.annee, c[C.annee], 'Année')}
+    ${field(C.table, C.meo, c[C.meo], 'Action MEO')}${field(C.table, C.com, c[C.com], 'Commentaire', 'w2')}</div>
+  <div class="sub" style="margin-top:6px">La section et l'année sont reprises de la ligne choisie.</div>
+  <div class="acts"><button class="b p" id="cSave">${S.editCmd ? 'Enregistrer' : 'Imputer la commande'}</button>${S.editCmd ? '<button class="b" id="cCancel">Annuler</button>' : ''}<span class="err" id="cErr"></span></div></div>`;
+}
+function bCommandes() {
+  $('cYr').onchange = e => { S.cmdYr = e.target.value; render(); };
+  document.querySelectorAll('tbody tr.click').forEach(tr => tr.onclick = () => { S.editCmd = +tr.dataset.id; S.over = false; render(); window.scrollTo(0, 0); });
+  if ($('cCancel')) $('cCancel').onclick = () => { S.editCmd = null; S.over = false; render(); };
+  const sync = () => { const l = L(+$('cLine').value); if (!l) return;
+    const sa = $(`in_${C.table}_${C.annee}`), ss = $(`in_${C.table}_${C.section}`);
+    if (sa) { if (![...sa.options].some(o => o.value === yearOf(l))) sa.add(new Option(yearOf(l), yearOf(l))); sa.value = yearOf(l); }
+    if (ss && l[B.section]) ss.value = l[B.section]; };
+  $('cLine').onchange = () => { S.over = false; $('cErr').textContent = ''; sync(); };
+  document.querySelectorAll('.form input,.form select,.form textarea').forEach(el => el.addEventListener('input', () => { $('cErr').textContent = ''; S.over = false; }));
+  if (!S.editCmd && +$('cLine').value) sync();
+  $('cSave').onclick = async () => {
+    const e = $('cErr'), lid = +$('cLine').value, l = L(lid);
+    if (!l) return e.textContent = 'Choisissez la ligne budgétaire';
+    const f = { [C.ligne]: lid };
+    [C.date, C.num, C.presta, C.resp, C.type, C.montant, C.section, C.annee, C.meo, C.com].forEach(c => { if (writable(C.table, c)) { const v = readField(C.table, c); if (v !== undefined) f[c] = v; } });
+    if (!(num(f[C.montant]) > 0)) return e.textContent = 'Saisissez un montant positif';
+    if (col(C.table, C.annee) && String(f[C.annee]) !== yearOf(l)) return e.textContent = `L'année doit être ${yearOf(l)} pour être comptée sur cette ligne`;
+    const old = S.editCmd ? num((S.data.C.find(x => x.id === S.editCmd) || {})[C.montant]) * ((S.data.C.find(x => x.id === S.editCmd) || {})[C.ligne] === lid) : 0;
+    if (num(f[C.montant]) > reste(l) + old + 0.005 && !S.over) { S.over = true; return e.textContent = `Le montant dépasse le reste de la ligne (${eur(reste(l) + old)}). Cliquez à nouveau pour confirmer le dépassement.`; }
+    try {
+      if (S.editCmd) await grist.docApi.applyUserActions([['UpdateRecord', C.table, S.editCmd, f]]);
+      else await grist.docApi.applyUserActions([['AddRecord', C.table, null, f]]);
+      toast(S.editCmd ? 'Commande modifiée' : 'Commande imputée'); S.editCmd = null; S.over = false; await load();
+    } catch (er) { e.textContent = 'Erreur : ' + er.message; }
+  };
+}
+
+/* ---------- 4. Reports et historique ---------- */
+function vReports() {
+  if (!hasT(R.table)) return `<div class="warn">La table « ${esc(R.table)} » n'existe pas dans ce document.</div>`;
+  const ys = years(); const cur = String(new Date().getFullYear());
+  if (!S.repFrom) S.repFrom = ys.filter(y => y < cur).pop() || ys[0] || cur;
+  if (!S.repTo || S.repTo <= S.repFrom) S.repTo = ys.find(y => y > S.repFrom) || String(+S.repFrom + 1);
+  const src = lines().filter(r => yearOf(r) === S.repFrom && reste(r) > 0.5).sort((a, b) => lineLabel(a).localeCompare(lineLabel(b)));
+  const hist = S.data.R.filter(x => { const s = L(x[R.source]); return !S.axe || (s && String(s[B.axe]) === S.axe); }).sort((a, b) => num(b[R.date]) - num(a[R.date]) || b.id - a.id);
+  return `<div class="tools"><b>Report de fin d'exercice</b><span class="sp"></span>
+    <label class="sub">De</label><select id="rFrom">${ys.map(y => `<option ${y === S.repFrom ? 'selected' : ''}>${esc(y)}</option>`).join('')}</select>
+    <span>→</span><label class="sub">Vers</label><select id="rTo">${ys.filter(y => y > S.repFrom).concat(ys.some(y => y > S.repFrom) ? [] : [String(+S.repFrom + 1)]).map(y => `<option ${y === S.repTo ? 'selected' : ''}>${esc(y)}</option>`).join('')}</select></div>
+  <div class="box"><table><thead><tr><th style="width:28px"><input type="checkbox" id="rAll" style="height:auto"></th><th>Ligne source (${esc(S.repFrom)})</th><th class="r">Reste</th><th class="r" style="width:120px">À reporter</th><th style="width:260px">Ligne cible (${esc(S.repTo)})</th><th style="width:180px">Motif</th></tr></thead><tbody>
+  ${src.map(r => { const tg = lines().filter(t => yearOf(t) === S.repTo && String(t[B.axe]) === String(r[B.axe]));
+    const def = tg.find(t => t[B.ref] === r[B.ref] && t[B.com] === r[B.com] && t[B.section] === r[B.section]);
+    return `<tr data-id="${r.id}"><td><input type="checkbox" class="rk" style="height:auto"></td>
+    <td>${esc(disp(B.table, B.axe, r[B.axe]))} · ${esc(r[B.ref])} ${sectionPill(r[B.section])}<div class="sub">${esc(r[B.com])}</div></td>
+    <td class="r">${eur(reste(r))}</td><td><input type="number" class="ra" step="0.01" min="0" value="${Math.round(reste(r) * 100) / 100}" style="width:100%;text-align:right"></td>
+    <td><select class="rt" style="width:100%"><option value="new" ${def ? '' : 'selected'}>+ Créer « ${esc(r[B.ref])} ${esc(S.repTo)} »</option>${tg.map(t => `<option value="${t.id}" ${def && def.id === t.id ? 'selected' : ''}>${esc(lineLabel(t))}</option>`).join('')}</select></td>
+    <td><input type="text" class="rm" placeholder="Retard de commande" style="width:100%"></td></tr>`; }).join('') || `<tr><td colspan="6" class="empty">Aucune ligne ${esc(S.repFrom)} avec un reste à consommer</td></tr>`}
+  </tbody></table></div>
+  <div class="acts"><span class="err" id="rErr"></span><span class="sp"></span><span class="sub" id="rSum"></span><button class="b p" id="rGo">Créer les reports</button></div>
+  <h2>Historique des reports</h2>
+  <div class="box"><table><thead><tr><th>Date</th><th>Ligne source → ligne cible</th><th class="r">Montant</th><th>Motif</th><th>Auteur</th></tr></thead><tbody>
+  ${hist.map(x => { const s = L(x[R.source]), t = L(x[R.cible]); return `<tr><td>${fmtDate(x[R.date])}</td><td>${s ? esc(lineLabel(s)) : '?'}<div class="sub">→ ${t ? esc(lineLabel(t)) : '?'}</div></td><td class="r"><b>${eur(x[R.montant])}</b></td><td>${esc(x[R.motif])}</td><td class="sub">${esc(x[R.auteur])}</td></tr>`; }).join('') || '<tr><td colspan="5" class="empty">Aucun report enregistré</td></tr>'}
+  </tbody></table></div>`;
+}
+function bReports() {
+  if (!$('rFrom')) return;
+  $('rFrom').onchange = e => { S.repFrom = e.target.value; S.repTo = ''; render(); };
+  $('rTo').onchange = e => { S.repTo = e.target.value; render(); };
+  const rows = [...document.querySelectorAll('tbody tr[data-id]')];
+  const upd = () => { $('rErr').textContent = ''; const s = rows.filter(tr => tr.querySelector('.rk').checked).reduce((a, tr) => a + num(tr.querySelector('.ra').value), 0); $('rSum').textContent = s ? 'Total sélectionné : ' + eur(s) : ''; };
+  rows.forEach(tr => tr.querySelectorAll('input,select').forEach(el => el.addEventListener('input', upd)));
+  $('rAll').onchange = e => { rows.forEach(tr => tr.querySelector('.rk').checked = e.target.checked); upd(); };
+  $('rGo').onclick = async () => {
+    const e = $('rErr'), sel = rows.filter(tr => tr.querySelector('.rk').checked);
+    if (!sel.length) return e.textContent = 'Cochez au moins une ligne';
+    const items = [];
+    for (const tr of sel) {
+      const l = L(+tr.dataset.id), m = num(tr.querySelector('.ra').value), t = tr.querySelector('.rt').value, mo = tr.querySelector('.rm').value.trim();
+      if (!(m > 0) || m > reste(l) + 0.005) return e.textContent = `Montant invalide pour « ${lineLabel(l)} » (entre 0 et ${eur(reste(l))})`;
+      if (!mo) return e.textContent = `Motif obligatoire pour « ${lineLabel(l)} »`;
+      items.push({ l, m, t, mo });
+    }
+    $('rGo').disabled = true;
+    try {
+      for (const it of items) {
+        let target = +it.t;
+        if (it.t === 'new') {
+          const f = {}; [B.axe, B.ref, B.com, B.section, B.service].forEach(c => { if (writable(B.table, c) && it.l[c] != null) f[c] = it.l[c]; });
+          f[B.annee] = typed(B.table, B.annee, S.repTo); f[B.montant] = 0;
+          target = (await grist.docApi.applyUserActions([['AddRecord', B.table, null, f]])).retValues[0];
+        }
+        const rf = { [R.source]: it.l.id, [R.cible]: target, [R.montant]: it.m, [R.motif]: it.mo };
+        if (writable(R.table, R.date)) rf[R.date] = todaySec();
+        await grist.docApi.applyUserActions([['AddRecord', R.table, null, rf]]);
+      }
+      toast(`${items.length} report(s) créé(s)`); await load();
+    } catch (er) { e.textContent = 'Erreur : ' + er.message; $('rGo').disabled = false; }
+  };
+}
+
+/* ---------- Démarrage ---------- */
+let tmr; const reload = () => { clearTimeout(tmr); tmr = setTimeout(load, 400); };
+grist.ready({ requiredAccess: 'full' });
+grist.onRecords(reload);
+load();
+</script>
+</body>
