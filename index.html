@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <title>Gestion du budget</title>
 <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <style>
 :root{--ac:#16b378;--ac-bg:#e8f7f1;--ac-dk:#0f7a52;--bd:#e3e3e3;--bg2:#f7f7f8;--tx:#262633;--tx2:#6b6b78;--red:#d64545;--red-bg:#fdecec;--amb:#b7791f;--amb-bg:#fdf4e3;--blue:#3b82c4;--blue-bg:#e8f1fb;--inv:#2f7d32;--inv-bg:#e6f4e6;--fon:#8a5a00;--fon-bg:#fdf1d8}
 *{box-sizing:border-box}
@@ -197,7 +199,7 @@ function fillAxe() {
 const sectionPill = v => v ? `<span class="pill ${/^inv/i.test(v) ? 'inv' : 'fon'}">${esc(v)}</span>` : '';
 
 /* ---------- Champs de formulaire génériques ---------- */
-function field(t, c, v, label, cls = '') {
+function field(t, c, v, label, cls = '', opts = {}) {
   const m = col(t, c); if (!m) return '';
   const id = `in_${t}_${c}`; let h;
   if (/^Ref:/.test(m.type)) {
@@ -211,6 +213,10 @@ function field(t, c, v, label, cls = '') {
   else if (/^(Numeric|Int)$/.test(m.type)) h = `<input type="number" step="0.01" id="${id}" value="${v ?? ''}">`;
   else if (c === B.com || c === C.com) h = `<textarea id="${id}">${esc(v ?? '')}</textarea>`;
   else h = `<input type="text" id="${id}" value="${esc(v ?? '')}">`;
+  if (opts.add && /^Ref:/.test(m.type)) h = `<div style="display:flex;gap:6px">${h.replace('<select ', '<select style="flex:1" ')}<button type="button" class="b" data-add="${t}|${c}" title="Ajouter un ${esc(opts.add)}">+</button></div>
+    <div id="add_${id}" hidden style="margin-top:6px;padding:8px;border:1px dashed var(--bd);border-radius:6px;background:var(--bg2)">
+      <input type="text" placeholder="Nom du nouveau ${esc(opts.add)}" style="width:100%;margin-bottom:6px">
+      <div style="display:flex;gap:6px;align-items:center"><button type="button" class="b p ok">Ajouter</button><button type="button" class="b ko">Annuler</button><span class="err"></span></div></div>`;
   return `<div class="f ${cls}"><label for="${id}">${esc(label || m.label || c)}</label>${h}</div>`;
 }
 function readField(t, c) {
@@ -225,14 +231,14 @@ function readField(t, c) {
 function typed(t, c, v) { const m = col(t, c); if (!m) return v; return m.type === 'Int' || m.type === 'Numeric' ? Number(v) : String(v); }
 
 /* ---------- Onglets ---------- */
-const TABS = ['Synthèse', 'Lignes budgétaires', 'Commandes', 'Reports et historique'];
+const TABS = ['Synthèse', 'Lignes budgétaires', 'Commandes', 'Reports et historique', 'Rapport PDF'];
 function render() {
   $('titre').textContent = CFG.titre;
   $('tabs').innerHTML = TABS.map((t, i) => `<button class="${i === S.tab ? 'on' : ''}" data-t="${i}">${t}</button>`).join('');
   const miss = S.missing.length ? `<div class="warn">Colonnes ou tables non trouvées : ${S.missing.map(esc).join(', ')}. Adaptez la section CONFIGURATION du widget.</div>` : '';
   if (!S.data.B) { $('view').innerHTML = miss || '<div class="empty">Aucune donnée.</div>'; return; }
-  $('view').innerHTML = miss + [vSynthese, vLignes, vCommandes, vReports][S.tab]();
-  [bSynthese, bLignes, bCommandes, bReports][S.tab]();
+  $('view').innerHTML = miss + [vSynthese, vLignes, vCommandes, vReports, vRapport][S.tab]();
+  [bSynthese, bLignes, bCommandes, bReports, bRapport][S.tab]();
 }
 $('tabs').onclick = e => { const t = e.target.dataset.t; if (t !== undefined) { S.tab = +t; render(); } };
 $('fAxe').onchange = e => { S.axe = e.target.value; render(); };
@@ -453,7 +459,7 @@ function formCmd() {
     <select id="cLine" style="width:100%"><option value="0">— Choisir une ligne —</option>${ls.map(r => `<option value="${r.id}" ${r.id === cur ? 'selected' : ''}>${esc(lineLabel(r))} — reste ${eur(reste(r))}</option>`).join('')}</select></div>
   <div class="grid">
     ${field(C.table, C.date, c[C.date] ?? todaySec(), 'Date')}${field(C.table, C.num, c[C.num], 'N° commande')}
-    ${field(C.table, C.presta, c[C.presta], 'Prestataire')}${field(C.table, C.resp, c[C.resp], 'Responsable')}
+    ${field(C.table, C.presta, c[C.presta], 'Prestataire', '', { add: 'prestataire' })}${field(C.table, C.resp, c[C.resp], 'Responsable')}
     ${field(C.table, C.type, c[C.type], 'Type d\'achat')}${field(C.table, C.montant, c[C.montant], 'Montant (€)')}
     ${field(C.table, C.section, c[C.section], 'Section')}${field(C.table, C.annee, c[C.annee], 'Année')}
     ${field(C.table, C.meo, c[C.meo], 'Action MEO')}${field(C.table, C.com, c[C.com], 'Commentaire', 'w2')}</div>
@@ -471,6 +477,7 @@ function bCommandes() {
     if (ss && l[B.section]) ss.value = l[B.section]; };
   $('cLine').onchange = () => { S.over = false; $('cErr').textContent = ''; sync(); };
   document.querySelectorAll('.form input,.form select,.form textarea').forEach(el => el.addEventListener('input', () => { $('cErr').textContent = ''; S.over = false; }));
+  bindAdds();
   if (!S.editCmd && +$('cLine').value) sync();
   $('cSave').onclick = async () => {
     const e = $('cErr'), lid = +$('cLine').value, l = L(lid);
@@ -549,6 +556,230 @@ function bReports() {
       toast(`${items.length} report(s) créé(s)`); await load();
     } catch (er) { e.textContent = 'Erreur : ' + er.message; $('rGo').disabled = false; }
   };
+}
+
+/* ---------- Ajout d'une valeur dans une table de référence (ex. prestataire) ---------- */
+async function addRefValue(t, c, name) {
+  const m = col(t, c), target = m.type.slice(4), vc = S.meta.byRowId[m.visibleCol];
+  if (!vc) throw new Error('La colonne n\'affiche aucun champ : réglez « Afficher la colonne » dans Grist');
+  if (vc.isFormula && vc.formula) throw new Error(`Le champ affiché (${vc.colId}) est une formule : ajout impossible depuis le widget`);
+  const key = target + '|' + m.visibleCol, map = S.refCache[key] = S.refCache[key] || {};
+  const n = name.trim(), found = Object.entries(map).find(([, l]) => l.trim().toLowerCase() === n.toLowerCase());
+  if (found) return { id: +found[0], existed: true };
+  const res = await grist.docApi.applyUserActions([['AddRecord', target, null, { [vc.colId]: n }]]);
+  map[res.retValues[0]] = n; return { id: res.retValues[0], existed: false };
+}
+function bindAdds() {
+  document.querySelectorAll('[data-add]').forEach(btn => {
+    const [t, c] = btn.dataset.add.split('|'), id = `in_${t}_${c}`, box = $('add_' + id);
+    const inp = box.querySelector('input'), err = box.querySelector('.err');
+    btn.onclick = () => { box.hidden = !box.hidden; if (!box.hidden) { inp.value = ''; err.textContent = ''; inp.focus(); } };
+    box.querySelector('.ko').onclick = () => { box.hidden = true; };
+    const go = async () => {
+      if (!inp.value.trim()) return err.textContent = 'Saisissez un nom';
+      try {
+        const r = await addRefValue(t, c, inp.value), sel = $(id);
+        if (![...sel.options].some(o => +o.value === r.id)) sel.add(new Option(inp.value.trim(), r.id));
+        sel.value = String(r.id); box.hidden = true;
+        toast(r.existed ? 'Déjà existant : sélectionné' : 'Ajouté et sélectionné');
+      } catch (er) { err.textContent = er.message; }
+    };
+    box.querySelector('.ok').onclick = go;
+    inp.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); go(); } };
+  });
+}
+
+/* ---------- 5. Rapport PDF ---------- */
+const RUBRIQUES = [['cles', 'Chiffres clés'], ['section', 'Exécution par section'], ['axe', 'Exécution par axe et référence'],
+  ['pluri', 'Évolution pluriannuelle'], ['alertes', 'Points d\'attention'], ['cmd', 'Commandes de la période'],
+  ['rep', 'Journal des reports'], ['annexe', 'Annexe : détail des lignes']];
+S.rp = { yr: '', arr: new Date().toISOString().slice(0, 10), seuil: 50,
+  rub: { cles: true, section: true, axe: true, pluri: true, alertes: true, cmd: true, rep: true, annexe: false } };
+
+function rpCalc() {
+  let arr = Infinity;
+  if (S.rp.arr) { const [y, m, d] = S.rp.arr.split('-').map(Number); arr = Date.UTC(y, m - 1, d) / 1000; }
+  const inDate = v => !v || num(v) <= arr;
+  const C_ = S.data.C.filter(c => inDate(c[C.date])), R_ = S.data.R.filter(x => inDate(x[R.date]));
+  const st = r => {
+    const rin = R_.filter(x => x[R.cible] === r.id).reduce((a, x) => a + num(x[R.montant]), 0);
+    const rout = R_.filter(x => x[R.source] === r.id).reduce((a, x) => a + num(x[R.montant]), 0);
+    const eng = C_.filter(c => c[C.ligne] === r.id && String(c[C.annee]) === yearOf(r)).reduce((a, c) => a + num(c[C.montant]), 0);
+    const d = prevu(r) + rin - rout; return { r, p: prevu(r), rin, rout, d, eng, rest: d - eng };
+  };
+  const all = lines().map(st), sel = all.filter(x => !S.rp.yr || yearOf(x.r) === S.rp.yr);
+  const ids = new Set(sel.map(x => x.r.id));
+  return { arr, all, sel, ids,
+    cmds: C_.filter(c => ids.has(c[C.ligne])).sort((a, b) => num(a[C.date]) - num(b[C.date])),
+    reps: R_.filter(x => ids.has(x[R.source]) || ids.has(x[R.cible])).sort((a, b) => num(a[R.date]) - num(b[R.date])) };
+}
+const agg = xs => xs.reduce((a, x) => ({ p: a.p + x.p, rin: a.rin + x.rin, rout: a.rout + x.rout, d: a.d + x.d, eng: a.eng + x.eng, rest: a.rest + x.rest }),
+  { p: 0, rin: 0, rout: 0, d: 0, eng: 0, rest: 0 });
+const tauxN = a => a.d > 0 ? a.eng / a.d * 100 : null;
+const tauxS = a => { const t = tauxN(a); return t == null ? '-' : Math.round(t) + ' %'; };
+
+function vRapport() {
+  const k = rpCalc(), a = agg(k.sel);
+  return `<div class="form"><h3>Paramètres du rapport</h3><div class="grid">
+    <div class="f"><label for="rpYr">Exercice</label><select id="rpYr"><option value="">Tous les exercices</option>${years().map(y => `<option ${y === S.rp.yr ? 'selected' : ''}>${esc(y)}</option>`).join('')}</select></div>
+    <div class="f"><label for="rpArr">Date d'arrêté</label><input type="date" id="rpArr" value="${S.rp.arr}"></div>
+    <div class="f"><label for="rpSeuil">Seuil de sous-consommation (%)</label><input type="number" id="rpSeuil" min="0" max="100" step="1" value="${S.rp.seuil}"></div>
+    <div class="f"><label>Axe</label><div style="padding-top:6px">${S.axe ? esc(disp(B.table, B.axe, +S.axe)) : 'Tous (filtre en haut du widget)'}</div></div></div>
+    <div class="f" style="margin-top:12px"><label>Rubriques à inclure</label>
+    <div style="display:flex;flex-wrap:wrap;gap:6px 18px">${RUBRIQUES.map(([key, l]) => `<label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--tx)"><input type="checkbox" class="rpRub" data-k="${key}" ${S.rp.rub[key] ? 'checked' : ''} style="height:auto">${l}</label>`).join('')}</div></div>
+    <div class="acts"><button class="b p" id="rpGo">Générer le PDF</button><span class="err" id="rpErr"></span></div></div>
+  <div class="sub" style="margin-bottom:8px">Aperçu des chiffres au ${S.rp.arr ? new Date(S.rp.arr).toLocaleDateString('fr-FR', { timeZone: 'UTC' }) : '—'} · ${k.sel.length} ligne(s), ${k.cmds.length} commande(s), ${k.reps.length} report(s)</div>
+  <div class="cards">
+    <div class="card"><div class="l">Prévu initial</div><div class="v">${eur(a.p)}</div></div>
+    <div class="card"><div class="l">Disponible</div><div class="v">${eur(a.d)}</div></div>
+    <div class="card"><div class="l">Engagé</div><div class="v">${eur(a.eng)}</div></div>
+    <div class="card"><div class="l">Reste</div><div class="v">${eur(a.rest)}</div></div>
+    <div class="card"><div class="l">Taux d'exécution</div><div class="v">${tauxS(a)}</div></div></div>`;
+}
+function bRapport() {
+  $('rpYr').onchange = e => { S.rp.yr = e.target.value; render(); };
+  $('rpArr').onchange = e => { S.rp.arr = e.target.value; render(); };
+  $('rpSeuil').onchange = e => { S.rp.seuil = Math.max(0, Math.min(100, +e.target.value || 0)); };
+  document.querySelectorAll('.rpRub').forEach(cb => cb.onchange = () => { S.rp.rub[cb.dataset.k] = cb.checked; });
+  $('rpGo').onclick = () => {
+    if (!Object.values(S.rp.rub).some(Boolean)) return $('rpErr').textContent = 'Cochez au moins une rubrique';
+    if (!window.jspdf) return $('rpErr').textContent = 'Bibliothèque PDF non chargée (accès à cdnjs.cloudflare.com bloqué ?)';
+    try { buildPdf(); } catch (er) { $('rpErr').textContent = 'Erreur : ' + er.message; console.error(er); }
+  };
+}
+
+/* Texte compatible avec les polices standard du PDF */
+const pt = s => String(s ?? '').replace(/[   ]/g, ' ').replace(/→/g, '->').replace(/[−–]/g, '-').replace(/⚠/g, '!')
+  .replace(/[^\x00-\xff€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•—˜™š›œžŸ]/g, '');
+const pe = v => pt(Math.round(num(v)).toLocaleString('fr-FR')) + ' €';
+const ps = v => (v > 0 ? '+' : v < 0 ? '-' : '') + (v ? pe(Math.abs(v)) : '-');
+
+function buildPdf() {
+  const { jsPDF } = window.jspdf, k = rpCalc(), a = agg(k.sel), rub = S.rp.rub;
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const W = 297, M = 14, HEAD = [52, 73, 94], ACC = [22, 179, 120], RED = [192, 80, 77], AMB = [183, 121, 31];
+  const arrTxt = S.rp.arr ? new Date(S.rp.arr).toLocaleDateString('fr-FR', { timeZone: 'UTC' }) : '-';
+  const perim = [S.rp.yr ? 'Exercice ' + S.rp.yr : 'Tous exercices', S.axe ? 'Axe ' + disp(B.table, B.axe, +S.axe) : 'Tous axes', 'Arrêté au ' + arrTxt].join('  ·  ');
+  let y = 0;
+  const TBL = { theme: 'grid', margin: { left: M, right: M, top: 22, bottom: 16 },
+    styles: { font: 'helvetica', fontSize: 8.5, cellPadding: 1.8, lineColor: [225, 225, 225], lineWidth: 0.2, textColor: [40, 40, 50] },
+    headStyles: { fillColor: HEAD, textColor: 255, fontStyle: 'bold' }, footStyles: { fillColor: [236, 239, 242], textColor: [30, 30, 40], fontStyle: 'bold' } };
+  const num6 = { halign: 'right' };
+  const title = t => { if (y > 170) { doc.addPage(); y = 24; } doc.setFont('helvetica', 'bold'); doc.setFontSize(12.5); doc.setTextColor(...HEAD); doc.text(pt(t), M, y); doc.setDrawColor(...ACC); doc.setLineWidth(0.6); doc.line(M, y + 1.6, M + 22, y + 1.6); y += 5; };
+  const table = o => { const cs = o.columnStyles || {}, user = o.didParseCell;
+    o.didParseCell = d => { if (d.section !== 'body' && cs[d.column.index] && cs[d.column.index].halign === 'right') d.cell.styles.halign = 'right'; if (user) user(d); };
+    doc.autoTable(Object.assign({}, TBL, { startY: y }, o)); y = doc.lastAutoTable.finalY + 9; };
+  const execRow = (lbl, s) => [pt(lbl), pe(s.p), ps(s.rin - s.rout), pe(s.d), pe(s.eng), pe(s.rest), tauxS(s)];
+  const execHead = [['', 'Prévu initial', 'Reports nets', 'Disponible', 'Engagé', 'Reste', 'Taux']];
+  const execCols = { 1: num6, 2: num6, 3: num6, 4: num6, 5: num6, 6: num6 };
+  const negRed = d => { if (d.section === 'body' && d.column.index === 5 && /^-/.test(String(d.cell.raw))) d.cell.styles.textColor = RED; };
+
+  /* Page de titre (en-tête du rapport) */
+  doc.setFillColor(...HEAD); doc.rect(0, 0, W, 30, 'F');
+  doc.setTextColor(255); doc.setFont('helvetica', 'bold'); doc.setFontSize(19); doc.text(pt('Rapport financier'), M, 14);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(11); doc.text(pt(CFG.titre + '  ·  ' + perim), M, 22);
+  y = 42;
+
+  if (rub.cles) {
+    title('Chiffres clés');
+    const boxes = [['Prévu initial', pe(a.p)], ['Reports nets', ps(a.rin - a.rout)], ['Disponible', pe(a.d)], ['Engagé', pe(a.eng)], ['Reste à consommer', pe(a.rest)], ["Taux d'exécution", tauxS(a)]];
+    const g = 4, bw = (W - 2 * M - g * 5) / 6;
+    boxes.forEach(([l, v], i) => { const x = M + i * (bw + g);
+      doc.setFillColor(244, 246, 248); doc.roundedRect(x, y, bw, 20, 2, 2, 'F');
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(110, 110, 120); doc.text(pt(l), x + 4, y + 7);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.setTextColor(...(i === 4 && a.rest < 0 ? RED : [30, 30, 40])); doc.text(pt(v), x + 4, y + 15.5); });
+    y += 26;
+    const t = Math.min(100, tauxN(a) || 0);
+    doc.setFillColor(225, 232, 240); doc.roundedRect(M, y, W - 2 * M, 4, 2, 2, 'F');
+    if (t > 0) { doc.setFillColor(...ACC); doc.roundedRect(M, y, (W - 2 * M) * t / 100, 4, 2, 2, 'F'); }
+    doc.setFontSize(8); doc.setTextColor(110, 110, 120); doc.setFont('helvetica', 'normal');
+    doc.text(pt(`Exécution : ${tauxS(a)} du budget disponible engagé`), M, y + 9); y += 18;
+  }
+
+  if (rub.section) {
+    title('Exécution par section');
+    const secs = [...new Set(k.sel.map(x => String(x.r[B.section] || 'Non renseignée')))].sort();
+    table({ head: execHead, body: secs.map(s => execRow(s, agg(k.sel.filter(x => String(x.r[B.section] || 'Non renseignée') === s)))),
+      foot: [execRow('Total', a)], columnStyles: Object.assign({ 0: { cellWidth: 60 } }, execCols), didParseCell: negRed });
+  }
+
+  if (rub.axe) {
+    title('Exécution par axe et référence budgétaire');
+    const body = [], axes = [...new Set(k.sel.map(x => disp(B.table, B.axe, x.r[B.axe]) || 'Sans axe'))].sort();
+    axes.forEach(ax => { const xs = k.sel.filter(x => (disp(B.table, B.axe, x.r[B.axe]) || 'Sans axe') === ax);
+      body.push({ axe: true, row: execRow(ax, agg(xs)) });
+      [...new Set(xs.map(x => String(x.r[B.ref] || '-')))].sort().forEach(rf => body.push({ row: execRow('    ' + rf, agg(xs.filter(x => String(x.r[B.ref] || '-') === rf))) })); });
+    table({ head: execHead, body: body.map(b => b.row), foot: [execRow('Total', a)], columnStyles: Object.assign({ 0: { cellWidth: 60 } }, execCols),
+      didParseCell: d => { negRed(d); if (d.section === 'body' && body[d.row.index].axe) { d.cell.styles.fontStyle = 'bold'; d.cell.styles.fillColor = [244, 246, 248]; } } });
+  }
+
+  if (rub.pluri) {
+    title('Évolution pluriannuelle');
+    const ys = [...new Set(k.all.map(x => yearOf(x.r)))].filter(Boolean).sort();
+    const row = (l, s) => [pt(l), pe(s.p), s.rin ? '+' + pe(s.rin) : '-', s.rout ? '-' + pe(s.rout) : '-', pe(s.d), pe(s.eng), pe(s.rest), tauxS(s)];
+    table({ head: [['Année', 'Prévu initial', 'Reports reçus', 'Reports cédés', 'Disponible', 'Engagé', 'Reste', 'Taux']],
+      body: ys.map(yy => row(yy, agg(k.all.filter(x => yearOf(x.r) === yy)))), foot: [row('Total', agg(k.all))],
+      columnStyles: { 0: { cellWidth: 30 }, 1: num6, 2: num6, 3: num6, 4: num6, 5: num6, 6: num6, 7: num6 },
+      didParseCell: d => { if (d.section === 'body' && d.cell.raw === S.rp.yr) d.row.cells && Object.values(d.row.cells).forEach(c => c.styles.fontStyle = 'bold'); } });
+  }
+
+  if (rub.alertes) {
+    title("Points d'attention");
+    const cur = String(new Date().getFullYear()), rows = [];
+    k.sel.filter(x => x.rest < -0.5).forEach(x => rows.push(['Dépassement', pt(lineLabel(x.r)), pe(x.d), pe(x.eng), pe(x.rest), tauxS(x)]));
+    k.sel.filter(x => x.d > 0 && yearOf(x.r) >= cur && (tauxN(x) || 0) < S.rp.seuil).forEach(x => rows.push([`Sous-consommation (< ${S.rp.seuil} %)`, pt(lineLabel(x.r)), pe(x.d), pe(x.eng), pe(x.rest), tauxS(x)]));
+    k.sel.filter(x => yearOf(x.r) < cur && x.rest > 0.5).forEach(x => rows.push(['Reste sur exercice clos (à reporter)', pt(lineLabel(x.r)), pe(x.d), pe(x.eng), pe(x.rest), tauxS(x)]));
+    if (!rows.length) { doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(80); doc.text(pt('Aucun point d\'attention à la date d\'arrêté.'), M, y + 3); y += 12; }
+    else table({ head: [['Alerte', 'Ligne', 'Disponible', 'Engagé', 'Reste', 'Taux']], body: rows,
+      columnStyles: { 0: { cellWidth: 55, fontStyle: 'bold' }, 2: num6, 3: num6, 4: num6, 5: num6 },
+      didParseCell: d => { if (d.section === 'body' && d.column.index === 0) d.cell.styles.textColor = /^D/.test(d.cell.raw) ? RED : AMB; } });
+  }
+
+  if (rub.cmd) {
+    title('Commandes de la période');
+    if (!k.cmds.length) { doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(80); doc.text(pt('Aucune commande.'), M, y + 3); y += 12; }
+    else {
+      table({ head: [['Date', 'N° commande', 'Prestataire', 'Ligne imputée', "Type d'achat", 'Montant']],
+        body: k.cmds.map(c => [fmtDate(c[C.date]), pt(c[C.num]), pt(disp(C.table, C.presta, c[C.presta])), pt(lineLabel(L(c[C.ligne]))), pt(c[C.type]), pe(c[C.montant])]),
+        foot: [['', '', '', '', 'Total', pe(k.cmds.reduce((s, c) => s + num(c[C.montant]), 0))]],
+        columnStyles: { 0: { cellWidth: 22 }, 1: { cellWidth: 30 }, 2: { cellWidth: 45 }, 4: { cellWidth: 34 }, 5: Object.assign({ cellWidth: 28 }, num6) } });
+      const types = {}; k.cmds.forEach(c => { const t = String(c[C.type] || 'Non renseigné'); types[t] = types[t] || [0, 0]; types[t][0]++; types[t][1] += num(c[C.montant]); });
+      const tot = k.cmds.reduce((s, c) => s + num(c[C.montant]), 0);
+      y -= 3; doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5); doc.setTextColor(...HEAD); doc.text(pt("Répartition par type d'achat"), M, y); y += 2;
+      table({ head: [["Type d'achat", 'Nb', 'Montant', 'Part']], body: Object.entries(types).sort((p, q) => q[1][1] - p[1][1]).map(([t, [n, m]]) => [pt(t), n, pe(m), tot ? Math.round(m / tot * 100) + ' %' : '-']),
+        tableWidth: 140, columnStyles: { 1: num6, 2: num6, 3: num6 } });
+    }
+  }
+
+  if (rub.rep) {
+    title('Journal des reports');
+    if (!k.reps.length) { doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(80); doc.text(pt('Aucun report sur la période.'), M, y + 3); y += 12; }
+    else table({ head: [['Date', 'Ligne source', 'Ligne cible', 'Montant', 'Motif', 'Auteur']],
+      body: k.reps.map(x => [fmtDate(x[R.date]), pt(L(x[R.source]) ? lineLabel(L(x[R.source])) : '?'), pt(L(x[R.cible]) ? lineLabel(L(x[R.cible])) : '?'), pe(x[R.montant]), pt(x[R.motif]), pt(x[R.auteur])]),
+      columnStyles: { 0: { cellWidth: 22 }, 3: Object.assign({ cellWidth: 26 }, num6), 5: { cellWidth: 30 } } });
+  }
+
+  if (rub.annexe) {
+    doc.addPage(); y = 24; title('Annexe : détail des lignes budgétaires');
+    const xs = k.sel.slice().sort((p, q) => yearOf(p.r).localeCompare(yearOf(q.r)) || lineLabel(p.r).localeCompare(lineLabel(q.r)));
+    table({ head: [['Année', 'Ligne', 'Section', 'Prévu', 'Reports nets', 'Disponible', 'Engagé', 'Reste', 'Taux']],
+      body: xs.map(x => [yearOf(x.r), pt([disp(B.table, B.axe, x.r[B.axe]), x.r[B.ref], x.r[B.com]].filter(Boolean).join(' · ')), pt(x.r[B.section]), pe(x.p), ps(x.rin - x.rout), pe(x.d), pe(x.eng), pe(x.rest), tauxS(x)]),
+      foot: [['', 'Total', '', pe(a.p), ps(a.rin - a.rout), pe(a.d), pe(a.eng), pe(a.rest), tauxS(a)]],
+      columnStyles: { 0: { cellWidth: 15 }, 2: { cellWidth: 28 }, 3: num6, 4: num6, 5: num6, 6: num6, 7: num6, 8: num6 },
+      didParseCell: d => { if (d.section === 'body' && d.column.index === 7 && /^-/.test(String(d.cell.raw))) d.cell.styles.textColor = RED; } });
+  }
+
+  /* En-têtes et pieds de page */
+  const n = doc.getNumberOfPages(), ed = new Date().toLocaleDateString('fr-FR');
+  for (let i = 1; i <= n; i++) {
+    doc.setPage(i);
+    if (i > 1) { doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(...HEAD); doc.text(pt('Rapport financier · ' + CFG.titre), M, 12);
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(120); doc.text(pt(perim), W - M, 12, { align: 'right' }); doc.setDrawColor(220); doc.setLineWidth(0.2); doc.line(M, 14.5, W - M, 14.5); }
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(140);
+    doc.text(pt('Édité le ' + ed), M, 203); doc.text(`${i} / ${n}`, W - M, 203, { align: 'right' });
+  }
+  doc.save(`Rapport_financier_${S.rp.yr || 'pluriannuel'}_${S.rp.arr || 'date'}.pdf`);
+  toast('PDF généré');
 }
 
 /* ---------- Démarrage ---------- */
