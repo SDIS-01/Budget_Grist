@@ -99,7 +99,7 @@ const CFG = {
 /* ==================================================== */
 
 const B = CFG.budget, C = CFG.cmd, R = CFG.rep;
-const S = { tab: 0, axe: '', yr: '', sec: '', editLine: null, editCmd: null, cmdYr: '', over: false,
+const S = { tab: 0, axe: '', yr: '', sec: '', editLine: null, lMode: null, pending: null, preLine: null, editCmd: null, cmdYr: '', over: false,
             repFrom: '', repTo: '', meta: null, data: {}, refCache: {}, missing: [] };
 const $ = id => document.getElementById(id);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -268,61 +268,165 @@ function vSynthese() {
 }
 function bSynthese() { const g = $('goRep'); if (g) g.onclick = () => { S.tab = 3; render(); }; }
 
-/* ---------- 2. Lignes budgétaires ---------- */
+/* ---------- 2. Lignes budgétaires ----------
+   S.lMode : null = liste | 'detail' = fiche en lecture | 'edit' = formulaire
+             'confirm' = récapitulatif avant enregistrement | 'new' = création */
+const LINE_FIELDS = () => [B.annee, B.axe, B.ref, B.section, B.service, B.montant, B.com].filter(c => writable(B.table, c));
+const FIELD_LABELS = () => ({ [B.annee]: 'Année', [B.axe]: 'Axe', [B.ref]: 'Référence budget', [B.section]: 'Section',
+  [B.service]: 'Service', [B.montant]: 'Montant prévu', [B.com]: 'Commentaire' });
+const showVal = (c, v) => c === B.montant ? eur(v) : (disp(B.table, c, v) || '—');
+
 function vLignes() {
+  if (S.lMode && S.lMode !== 'new' && !L(S.editLine)) S.lMode = null;
+  if (S.lMode === 'new') return formLigne(null);
+  if (S.lMode) return vDetail();
   const ls = lines().filter(r => (!S.yr || yearOf(r) === S.yr) && (!S.sec || r[B.section] === S.sec))
     .sort((a, b) => yearOf(a).localeCompare(yearOf(b)) || lineLabel(a).localeCompare(lineLabel(b)));
   const secs = col(B.table, B.section)?.choices || [];
   const tot = k => ls.reduce((a, r) => a + k(r), 0);
-  return `${S.editLine !== null ? formLigne() : ''}
-  <div class="tools">
+  return `<div class="tools">
     <select id="lYr"><option value="">Toutes les années</option>${years().map(y => `<option ${y === S.yr ? 'selected' : ''}>${esc(y)}</option>`).join('')}</select>
     <select id="lSec"><option value="">Toutes les sections</option>${secs.map(s => `<option ${s === S.sec ? 'selected' : ''}>${esc(s)}</option>`).join('')}</select>
-    <span class="sp"></span><span class="sub">${ls.length} ligne(s)</span><button class="b p" id="lNew">+ Nouvelle ligne</button></div>
+    <span class="sp"></span><span class="sub">${ls.length} ligne(s) · cliquez sur une ligne pour voir son détail</span><button class="b" id="lNew">+ Nouvelle ligne</button></div>
   <div class="box"><table><thead><tr><th>Année</th><th>Ligne</th><th>Section</th><th class="r">Prévu</th><th class="r">Reports</th><th class="r">Disponible</th><th class="r">Consommé</th><th class="r">Reste</th></tr></thead><tbody>
-  ${ls.map(r => { const rp = dispo(r) - prevu(r); return `<tr class="click ${S.editLine === r.id ? 'sel' : ''}" data-id="${r.id}">
+  ${ls.map(r => { const rp = dispo(r) - prevu(r); return `<tr class="click" data-id="${r.id}">
     <td>${esc(yearOf(r))}</td><td>${esc(disp(B.table, B.axe, r[B.axe]))} · ${esc(r[B.ref])}<div class="sub">${esc(r[B.com])}</div></td>
     <td>${sectionPill(r[B.section])}</td><td class="r">${eur(prevu(r))}</td>
     <td class="r ${rp > 0 ? 'pos' : rp < 0 ? 'neg' : 'mut'}">${rp ? (rp > 0 ? '+' : '') + eur(rp) : '–'}</td>
     <td class="r">${eur(dispo(r))}</td><td class="r">${eur(conso(r))}</td><td class="r ${reste(r) < 0 ? 'neg' : ''}"><b>${eur(reste(r))}</b></td></tr>`; }).join('') || '<tr><td colspan="8" class="empty">Aucune ligne</td></tr>'}
   </tbody><tfoot><tr><th colspan="3">Total</th><th class="r">${eur(tot(prevu))}</th><th></th><th class="r">${eur(tot(dispo))}</th><th class="r">${eur(tot(conso))}</th><th class="r">${eur(tot(reste))}</th></tr></tfoot></table></div>`;
 }
-function formLigne() {
-  const r = S.editLine ? L(S.editLine) : {};
-  const n = !S.editLine;
-  const cmds = n ? [] : S.data.C.filter(c => c[C.ligne] === r.id);
-  const reps = n ? [] : S.data.R.filter(x => x[R.source] === r.id || x[R.cible] === r.id);
-  return `<div class="form"><h3>${n ? 'Nouvelle ligne budgétaire' : 'Ligne : ' + esc(lineLabel(r))}</h3>
-  <div class="grid">
-    ${field(B.table, B.annee, r[B.annee] ?? S.yr, 'Année')}${field(B.table, B.axe, r[B.axe] ?? (+S.axe || 0), 'Axe')}
-    ${field(B.table, B.ref, r[B.ref], 'Référence budget')}${field(B.table, B.section, r[B.section], 'Section')}
-    ${field(B.table, B.service, r[B.service], 'Service')}${field(B.table, B.montant, r[B.montant], 'Montant prévu (€)')}
-    ${field(B.table, B.com, r[B.com], 'Commentaire', 'w2')}</div>
-  ${n ? '' : `<div class="sub" style="margin-top:8px">Disponible ${eur(dispo(r))} · Consommé ${eur(conso(r))} · Reste <b>${eur(reste(r))}</b> — le montant prévu est le montant initial : les reports ne le modifient pas.</div>`}
-  <div class="acts"><button class="b p" id="lSave">${n ? 'Créer la ligne' : 'Enregistrer'}</button><button class="b" id="lCancel">Fermer</button><span class="err" id="lErr"></span></div>
-  ${cmds.length || reps.length ? `<div class="grid" style="margin-top:12px;grid-template-columns:1fr 1fr">
-    <div><div class="sub" style="margin-bottom:4px">Commandes imputées (${cmds.length})</div>${cmds.map(c => `<div>${fmtDate(c[C.date])} · ${esc(disp(C.table, C.presta, c[C.presta]))} · <b>${eur(c[C.montant])}</b></div>`).join('') || '<div class="mut">—</div>'}</div>
-    <div><div class="sub" style="margin-bottom:4px">Reports (${reps.length})</div>${reps.map(x => `<div>${fmtDate(x[R.date])} · ${x[R.source] === r.id ? '<span class="neg">sortant</span> vers ' + esc(yearOf(L(x[R.cible]) || {})) : '<span class="pos">entrant</span> de ' + esc(yearOf(L(x[R.source]) || {}))} · <b>${eur(x[R.montant])}</b></div>`).join('') || '<div class="mut">—</div>'}</div></div>` : ''}
-  </div>`;
+
+function vDetail() {
+  const r = L(S.editLine);
+  const cmds = S.data.C.filter(c => c[C.ligne] === r.id).sort((a, b) => num(b[C.date]) - num(a[C.date]));
+  const reps = S.data.R.filter(x => x[R.source] === r.id || x[R.cible] === r.id).sort((a, b) => num(b[R.date]) - num(a[R.date]) || b.id - a.id);
+  const rin = reps.filter(x => x[R.cible] === r.id).reduce((a, x) => a + num(x[R.montant]), 0);
+  const rout = reps.filter(x => x[R.source] === r.id).reduce((a, x) => a + num(x[R.montant]), 0);
+  const d = dispo(r), co = conso(r), pc = d > 0 ? Math.min(100, co / d * 100) : (co > 0 ? 100 : 0);
+  const info = [['Année', esc(yearOf(r))], ['Axe', esc(disp(B.table, B.axe, r[B.axe]))], ['Référence budget', esc(r[B.ref])],
+    ['Section', sectionPill(r[B.section])], ['Service', esc(disp(B.table, B.service, r[B.service]))],
+    ['Groupement', esc(disp(B.table, B.groupement, r[B.groupement]))]].filter(x => x[1]);
+  let top;
+  if (S.lMode === 'edit') top = formLigne(r);
+  else if (S.lMode === 'confirm') top = vConfirm(r, cmds, reps);
+  else top = `<div class="form"><div class="grid">${info.map(([l, v]) => `<div class="f"><label>${l}</label><div>${v}</div></div>`).join('')}</div>
+    ${r[B.com] ? `<div class="f" style="margin-top:10px"><label>Commentaire</label><div>${esc(r[B.com])}</div></div>` : ''}
+    <div class="acts" style="justify-content:flex-end"><button class="b" id="dEdit" title="Modifier les caractéristiques de la ligne">✎ Modifier la ligne…</button></div></div>`;
+  return `<div class="tools"><button class="b" id="dBack">← Retour à la liste</button><span class="sp"></span>
+    <button class="b p" id="dCmd">+ Commande sur cette ligne</button></div>
+  <h2 style="margin-top:4px">${esc(lineLabel(r))}</h2>
+  ${top}
+  <div class="cards">
+    <div class="card"><div class="l">Prévu initial</div><div class="v">${eur(prevu(r))}</div></div>
+    <div class="card"><div class="l">Reports entrants</div><div class="v ${rin ? 'pos' : 'mut'}">${rin ? '+' + eur(rin) : '–'}</div></div>
+    <div class="card"><div class="l">Reports sortants</div><div class="v ${rout ? 'neg' : 'mut'}">${rout ? '−' + eur(rout) : '–'}</div></div>
+    <div class="card"><div class="l">Disponible</div><div class="v">${eur(d)}</div></div>
+    <div class="card"><div class="l">Consommé</div><div class="v">${eur(co)}</div></div>
+    <div class="card"><div class="l">Reste à consommer</div><div class="v ${reste(r) < 0 ? 'neg' : ''}" style="${reste(r) < 0 ? '' : 'color:var(--ac-dk)'}">${eur(reste(r))}</div></div></div>
+  <div class="bar" style="margin:-4px 0 4px"><i style="width:${pc}%;background:${reste(r) < 0 ? 'var(--red)' : 'var(--ac)'}"></i><i style="width:${100 - pc}%;background:#b9d6f2"></i></div>
+  <div class="sub">${Math.round(pc)} % consommé</div>
+  <h2>Commandes imputées (${cmds.length})</h2>
+  <div class="box"><table><thead><tr><th>Date</th><th>N° commande</th><th>Prestataire</th><th>Type d'achat</th><th>Commentaire</th><th class="r">Montant</th></tr></thead><tbody>
+  ${cmds.map(c => `<tr class="click" data-cmd="${c.id}" title="Ouvrir la commande"><td>${fmtDate(c[C.date])}</td><td>${esc(c[C.num])}</td>
+    <td>${esc(disp(C.table, C.presta, c[C.presta]))}<div class="sub">${esc(disp(C.table, C.resp, c[C.resp]))}</div></td>
+    <td>${esc(c[C.type])}</td><td class="sub">${esc(c[C.com])}${String(c[C.annee]) !== yearOf(r) ? '<div class="neg">⚠ Année ' + esc(c[C.annee]) + ' : non comptée</div>' : ''}</td>
+    <td class="r"><b>${eur(c[C.montant])}</b></td></tr>`).join('') || '<tr><td colspan="6" class="empty">Aucune commande sur cette ligne</td></tr>'}
+  </tbody>${cmds.length ? `<tfoot><tr><th colspan="5">Total</th><th class="r">${eur(cmds.reduce((a, c) => a + num(c[C.montant]), 0))}</th></tr></tfoot>` : ''}</table></div>
+  <h2>Reports (${reps.length})</h2>
+  <div class="box"><table><thead><tr><th>Date</th><th>Sens</th><th>Ligne liée</th><th class="r">Montant</th><th>Motif</th><th>Auteur</th></tr></thead><tbody>
+  ${reps.map(x => { const out = x[R.source] === r.id, o = L(out ? x[R.cible] : x[R.source]);
+    return `<tr><td>${fmtDate(x[R.date])}</td><td>${out ? '<span class="pill fon">Sortant</span>' : '<span class="pill inv">Entrant</span>'}</td>
+    <td>${out ? 'vers ' : 'depuis '}${o ? esc(lineLabel(o)) : '?'}</td><td class="r ${out ? 'neg' : 'pos'}"><b>${out ? '−' : '+'}${eur(x[R.montant])}</b></td>
+    <td>${esc(x[R.motif])}</td><td class="sub">${esc(x[R.auteur])}</td></tr>`; }).join('') || '<tr><td colspan="6" class="empty">Aucun report sur cette ligne</td></tr>'}
+  </tbody></table></div>`;
 }
+
+function formLigne(r) {
+  const n = !r, v = c => S.pending && c in S.pending ? S.pending[c] : (r ? r[c] : (c === B.annee ? S.yr : c === B.axe ? (+S.axe || 0) : undefined));
+  return `<div class="form"><h3>${n ? 'Nouvelle ligne budgétaire' : 'Modifier la ligne'}</h3>
+  ${n ? '' : `<div class="warn">Le montant prévu correspond au budget voté. Pour décaler du budget sur une autre année, utilisez plutôt un <b>report</b> : l'historique sera conservé.</div>`}
+  <div class="grid">
+    ${field(B.table, B.annee, v(B.annee), 'Année')}${field(B.table, B.axe, v(B.axe), 'Axe')}
+    ${field(B.table, B.ref, v(B.ref), 'Référence budget')}${field(B.table, B.section, v(B.section), 'Section')}
+    ${field(B.table, B.service, v(B.service), 'Service')}${field(B.table, B.montant, v(B.montant), 'Montant prévu (€)')}
+    ${field(B.table, B.com, v(B.com), 'Commentaire', 'w2')}</div>
+  <div class="acts"><button class="b p" id="lSave">${n ? 'Créer la ligne' : 'Vérifier les modifications'}</button><button class="b" id="lCancel">Annuler</button><span class="err" id="lErr"></span></div></div>`;
+}
+
+function diffLine(r) {
+  return LINE_FIELDS().filter(c => S.pending && c in S.pending && String(S.pending[c] ?? '') !== String(r[c] ?? ''));
+}
+function vConfirm(r, cmds, reps) {
+  const ch = diffLine(r), L_ = FIELD_LABELS();
+  const warns = [];
+  if (ch.includes(B.montant)) {
+    const nr = reste(r) + num(S.pending[B.montant]) - prevu(r);
+    if (nr < 0) warns.push(`Avec ce montant, le reste à consommer deviendrait négatif (${eur(nr)}).`);
+  }
+  if (ch.includes(B.annee) && (cmds.length || reps.length))
+    warns.push(`Cette ligne a ${cmds.length} commande(s) et ${reps.length} report(s). Changer son année fera sortir du calcul les commandes saisies sur l'ancienne année.`);
+  return `<div class="form" style="border-color:var(--amb)"><h3>Confirmer la modification</h3>
+  <div class="box" style="margin-bottom:10px"><table><thead><tr><th>Champ</th><th>Avant</th><th>Après</th></tr></thead><tbody>
+  ${ch.map(c => `<tr><td>${L_[c]}</td><td class="mut" style="text-decoration:line-through">${esc(showVal(c, r[c]))}</td><td><b>${esc(showVal(c, S.pending[c]))}</b></td></tr>`).join('')}
+  </tbody></table></div>
+  ${warns.map(w => `<div class="alert">⚠ ${esc(w)}</div>`).join('')}
+  <div class="acts"><button class="b p" id="cfOk">Confirmer et enregistrer</button><button class="b" id="cfBack">Revenir au formulaire</button><button class="b" id="cfCancel">Abandonner</button><span class="err" id="cfErr"></span></div></div>`;
+}
+
+function readLine() {
+  const f = {}; LINE_FIELDS().forEach(c => { const v = readField(B.table, c); if (v !== undefined) f[c] = v; });
+  return f;
+}
+function checkLine(f) {
+  if (!f[B.annee]) return 'Indiquez l\'année';
+  if (f[B.montant] == null || isNaN(f[B.montant])) return 'Indiquez le montant prévu (0 accepté)';
+  return '';
+}
+
 function bLignes() {
-  $('lYr').onchange = e => { S.yr = e.target.value; render(); };
-  $('lSec').onchange = e => { S.sec = e.target.value; render(); };
-  $('lNew').onclick = () => { S.editLine = 0; render(); };
-  document.querySelectorAll('tbody tr.click').forEach(tr => tr.onclick = () => { S.editLine = +tr.dataset.id; render(); window.scrollTo(0, 0); });
-  if (S.editLine === null) return;
-  $('lCancel').onclick = () => { S.editLine = null; render(); };
-  $('lSave').onclick = async () => {
-    const f = {}; [B.annee, B.axe, B.ref, B.section, B.service, B.montant, B.com].forEach(c => { if (writable(B.table, c)) { const v = readField(B.table, c); if (v !== undefined) f[c] = v; } });
-    const e = $('lErr');
-    if (!f[B.annee]) return e.textContent = 'Indiquez l\'année';
-    if (f[B.montant] == null || isNaN(f[B.montant])) return e.textContent = 'Indiquez le montant prévu (0 accepté)';
-    try {
-      if (S.editLine) await grist.docApi.applyUserActions([['UpdateRecord', B.table, S.editLine, f]]);
-      else { const res = await grist.docApi.applyUserActions([['AddRecord', B.table, null, f]]); S.editLine = res.retValues[0]; }
-      toast('Ligne enregistrée'); await load();
-    } catch (er) { e.textContent = 'Erreur : ' + er.message; }
-  };
+  if (!S.lMode) {
+    $('lYr').onchange = e => { S.yr = e.target.value; render(); };
+    $('lSec').onchange = e => { S.sec = e.target.value; render(); };
+    $('lNew').onclick = () => { S.lMode = 'new'; S.pending = null; render(); };
+    document.querySelectorAll('tbody tr.click').forEach(tr => tr.onclick = () => { S.editLine = +tr.dataset.id; S.lMode = 'detail'; render(); window.scrollTo(0, 0); });
+    return;
+  }
+  if (S.lMode === 'new') {
+    $('lCancel').onclick = () => { S.lMode = null; render(); };
+    $('lSave').onclick = async () => {
+      const f = readLine(), e = $('lErr'), m = checkLine(f); if (m) return e.textContent = m;
+      try { const res = await grist.docApi.applyUserActions([['AddRecord', B.table, null, f]]);
+        S.editLine = res.retValues[0]; S.lMode = 'detail'; toast('Ligne créée'); await load(); }
+      catch (er) { e.textContent = 'Erreur : ' + er.message; }
+    };
+    return;
+  }
+  const r = L(S.editLine);
+  $('dBack').onclick = () => { S.lMode = null; S.pending = null; render(); };
+  $('dCmd').onclick = () => { S.tab = 2; S.editCmd = null; S.preLine = r.id; S.over = false; render(); window.scrollTo(0, 0); };
+  document.querySelectorAll('tr[data-cmd]').forEach(tr => tr.onclick = () => { S.tab = 2; S.editCmd = +tr.dataset.cmd; S.preLine = r.id; S.over = false; render(); window.scrollTo(0, 0); });
+  if (S.lMode === 'detail') { $('dEdit').onclick = () => { S.lMode = 'edit'; S.pending = null; render(); }; return; }
+  if (S.lMode === 'edit') {
+    $('lCancel').onclick = () => { S.lMode = 'detail'; S.pending = null; render(); };
+    $('lSave').onclick = () => {
+      const f = readLine(), e = $('lErr'), m = checkLine(f); if (m) return e.textContent = m;
+      S.pending = f;
+      if (!diffLine(r).length) return e.textContent = 'Aucune modification à enregistrer';
+      S.lMode = 'confirm'; render();
+    };
+    return;
+  }
+  if (S.lMode === 'confirm') {
+    $('cfBack').onclick = () => { S.lMode = 'edit'; render(); };
+    $('cfCancel').onclick = () => { S.lMode = 'detail'; S.pending = null; render(); };
+    $('cfOk').onclick = async () => {
+      const f = {}; diffLine(r).forEach(c => f[c] = S.pending[c]);
+      try { await grist.docApi.applyUserActions([['UpdateRecord', B.table, r.id, f]]);
+        S.lMode = 'detail'; S.pending = null; toast('Ligne modifiée'); await load(); }
+      catch (er) { $('cfErr').textContent = 'Erreur : ' + er.message; }
+    };
+  }
 }
 
 /* ---------- 3. Commandes ---------- */
@@ -343,7 +447,7 @@ function vCommandes() {
 function formCmd() {
   const c = S.editCmd ? S.data.C.find(x => x.id === S.editCmd) || {} : {};
   const ls = lines().slice().sort((a, b) => yearOf(a).localeCompare(yearOf(b)) || lineLabel(a).localeCompare(lineLabel(b)));
-  const cur = c[C.ligne] || 0;
+  const cur = c[C.ligne] || S.preLine || 0;
   return `<div class="form"><h3>${S.editCmd ? 'Modifier la commande ' + esc(c[C.num] || '') : 'Nouvelle commande'}</h3>
   <div class="f" style="margin-bottom:10px"><label for="cLine">Ligne budgétaire imputée</label>
     <select id="cLine" style="width:100%"><option value="0">— Choisir une ligne —</option>${ls.map(r => `<option value="${r.id}" ${r.id === cur ? 'selected' : ''}>${esc(lineLabel(r))} — reste ${eur(reste(r))}</option>`).join('')}</select></div>
@@ -354,12 +458,13 @@ function formCmd() {
     ${field(C.table, C.section, c[C.section], 'Section')}${field(C.table, C.annee, c[C.annee], 'Année')}
     ${field(C.table, C.meo, c[C.meo], 'Action MEO')}${field(C.table, C.com, c[C.com], 'Commentaire', 'w2')}</div>
   <div class="sub" style="margin-top:6px">La section et l'année sont reprises de la ligne choisie.</div>
-  <div class="acts"><button class="b p" id="cSave">${S.editCmd ? 'Enregistrer' : 'Imputer la commande'}</button>${S.editCmd ? '<button class="b" id="cCancel">Annuler</button>' : ''}<span class="err" id="cErr"></span></div></div>`;
+  <div class="acts"><button class="b p" id="cSave">${S.editCmd ? 'Enregistrer' : 'Imputer la commande'}</button>${S.editCmd || S.preLine ? '<button class="b" id="cCancel">Annuler</button>' : ''}<span class="err" id="cErr"></span></div></div>`;
 }
 function bCommandes() {
   $('cYr').onchange = e => { S.cmdYr = e.target.value; render(); };
   document.querySelectorAll('tbody tr.click').forEach(tr => tr.onclick = () => { S.editCmd = +tr.dataset.id; S.over = false; render(); window.scrollTo(0, 0); });
-  if ($('cCancel')) $('cCancel').onclick = () => { S.editCmd = null; S.over = false; render(); };
+  const backToLine = () => { if (S.preLine) { S.tab = 1; S.lMode = 'detail'; S.editLine = S.preLine; } S.preLine = null; };
+  if ($('cCancel')) $('cCancel').onclick = () => { S.editCmd = null; S.over = false; backToLine(); render(); };
   const sync = () => { const l = L(+$('cLine').value); if (!l) return;
     const sa = $(`in_${C.table}_${C.annee}`), ss = $(`in_${C.table}_${C.section}`);
     if (sa) { if (![...sa.options].some(o => o.value === yearOf(l))) sa.add(new Option(yearOf(l), yearOf(l))); sa.value = yearOf(l); }
@@ -379,7 +484,7 @@ function bCommandes() {
     try {
       if (S.editCmd) await grist.docApi.applyUserActions([['UpdateRecord', C.table, S.editCmd, f]]);
       else await grist.docApi.applyUserActions([['AddRecord', C.table, null, f]]);
-      toast(S.editCmd ? 'Commande modifiée' : 'Commande imputée'); S.editCmd = null; S.over = false; await load();
+      toast(S.editCmd ? 'Commande modifiée' : 'Commande imputée'); S.editCmd = null; S.over = false; backToLine(); await load();
     } catch (er) { e.textContent = 'Erreur : ' + er.message; }
   };
 }
